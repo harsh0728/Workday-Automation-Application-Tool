@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Workday AI Autofill</title>
+</head>
+<body>
+  <h2>Workday AI Autofill</h2>
+
+  <input type="file" id="resumeFile" accept=".pdf,.docx" />
+
+  <button id="parseBtn">Parse Resume</button>
+
+  <p id="status">Ready</p>
+
+  <pre id="output"></pre>
+
+  <button id="mapBtn">Map Workday Fields</button>
+  <h3>Field Mappings</h3>
+  <pre id="mappingOutput"></pre>
+
+  <button id="autofillBtn">Autofill Safe Fields</button>
+  <pre id="autofillOutput"></pre>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
