@@ -32,7 +32,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "vendor/pdf.worker.min.mjs"
+        "vendor/pdf.worker.min.mjs",
+        "vendor/mammoth.browser.min.js"
       ],
       "matches": [
         "<all_urls>"

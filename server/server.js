@@ -6,7 +6,6 @@ const { GoogleGenAI } = require("@google/genai");
 dotenv.config();
 
 const app = express();
-
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
@@ -14,47 +13,35 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY
 });
 
-const MODEL = "gemini-3.5-flash-lite";
+const MODEL = "gemini-3.6-flash";
 
-/*
-|--------------------------------------------------------------------------
-| Helper: Gemini JSON
-|--------------------------------------------------------------------------
-*/
-
-async function generateJSON(prompt) {
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json"
+async function generateJSON(prompt, maxRetries = 3) {
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      const response = await ai.models.generateContent({
+        model: MODEL,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+      return JSON.parse(response.text);
+    } catch (error) {
+      attempt++;
+      if (attempt >= maxRetries) throw error;
+      console.warn(`Gemini API error (attempt ${attempt}/${maxRetries}):`, error.message);
+      await new Promise(res => setTimeout(res, 1000 * attempt));
     }
-  });
-
-  return JSON.parse(response.text);
+  }
 }
-
-/*
-|--------------------------------------------------------------------------
-| Resume Parsing
-|--------------------------------------------------------------------------
-*/
 
 app.post("/api/parse-resume", async (req, res) => {
   try {
-    const {
-      resumeText,
-      links = [],
-      profiles = {}
-    } = req.body;
-
+    const { resumeText, links = [], profiles = {} } = req.body;
     if (!resumeText || !resumeText.trim()) {
-      return res.status(400).json({
-        success: false,
-        error: "Resume text is required"
-      });
+      return res.status(400).json({ success: false, error: "Resume text is required" });
     }
-
     const prompt = `
 You are an expert resume parser.
 
@@ -155,44 +142,20 @@ ${JSON.stringify(profiles, null, 2)}
 All detected links:
 ${JSON.stringify(links, null, 2)}
 `;
-
     const resumeData = await generateJSON(prompt);
-
-    res.json({
-      success: true,
-      resumeData
-    });
-
+    res.json({ success: true, resumeData });
   } catch (error) {
     console.error("Gemini parsing error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: error.message || "Failed to parse resume"
-    });
+    res.status(500).json({ success: false, error: error.message || "Failed to parse resume" });
   }
 });
 
-/*
-|--------------------------------------------------------------------------
-| AI Workday Field Mapping
-|--------------------------------------------------------------------------
-*/
-
 app.post("/api/map-fields", async (req, res) => {
   try {
-    const {
-      resumeData,
-      fields
-    } = req.body;
-
+    const { resumeData, fields } = req.body;
     if (!resumeData || !fields) {
-      return res.status(400).json({
-        success: false,
-        error: "resumeData and fields are required"
-      });
+      return res.status(400).json({ success: false, error: "resumeData and fields are required" });
     }
-
     const prompt = `
 You are an expert Workday application automation engine.
 
@@ -304,24 +267,12 @@ Return exactly:
   ]
 }
 `;
-
     const mappings = await generateJSON(prompt);
-
-    /*
-     * Server-side safety validation.
-     * Never allow Gemini to accidentally return unsafe fields.
-     */
 
     if (Array.isArray(mappings.mappings)) {
       mappings.mappings = mappings.mappings.map((mapping) => {
-        const label = String(
-          mapping.label || ""
-        ).toLowerCase();
-
-        const fieldId = String(
-          mapping.fieldId || ""
-        ).toLowerCase();
-
+        const label = String(mapping.label || "").toLowerCase();
+        const fieldId = String(mapping.fieldId || "").toLowerCase();
         const sensitive =
           label.includes("password") ||
           label.includes("verify password") ||
@@ -338,46 +289,21 @@ Return exactly:
             requiresConfirmation: true
           };
         }
-
         return mapping;
       });
     }
 
     res.json(mappings);
-
   } catch (error) {
     console.error("Field mapping error:", error);
-
-    res.status(500).json({
-      success: false,
-      error:
-        error.message ||
-        "Failed to map Workday fields"
-    });
+    res.status(500).json({ success: false, error: error.message || "Failed to map Workday fields" });
   }
 });
 
-/*
-|--------------------------------------------------------------------------
-| Health Check
-|--------------------------------------------------------------------------
-*/
-
 app.get("/api/health", (req, res) => {
-  res.json({
-    success: true,
-    message: "Workday AI backend is running"
-  });
+  res.json({ success: true, message: "Workday AI backend is running" });
 });
 
-/*
-|--------------------------------------------------------------------------
-| Start Server
-|--------------------------------------------------------------------------
-*/
-
 app.listen(3000, () => {
-  console.log(
-    "Server running on http://localhost:3000"
-  );
+  console.log("Server running on http://localhost:3000");
 });
