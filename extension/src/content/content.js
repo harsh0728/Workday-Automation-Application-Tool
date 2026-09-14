@@ -52,16 +52,13 @@ function findElement(fieldId) {
   const escaped = cssEscape(fieldId);
 
   return (
-    document.getElementById(fieldId) ||
-
     document.querySelector(
       `[data-automation-id="${escaped}"]`
     ) ||
-
+    document.getElementById(fieldId) ||
     document.querySelector(
       `[name="${escaped}"]`
     ) ||
-
     document.querySelector(
       `[data-wd-ai-field-id="${escaped}"]`
     )
@@ -217,38 +214,22 @@ function fillSelect(
 |--------------------------------------------------------------------------
 */
 
-function findVisibleOption(
-  value
-) {
+function findVisibleOption(value) {
   const target = normalize(value);
+  const firstWord = target.split(' ')[0];
 
   const options = [
-    ...document.querySelectorAll(
-      '[role="option"]'
-    )
+    ...document.querySelectorAll('[role="option"]')
   ].filter(isVisible);
 
   return (
-    options.find(
-      (option) =>
-        normalize(option.innerText) === target
-    ) ||
-    options.find(
-      (option) =>
-        normalize(
-          option.getAttribute(
-            "aria-label"
-          )
-        ) === target
-    ) ||
-    options.find(
-      (option) =>
-        normalize(option.innerText)
-          .includes(target)
-    )
+    options.find(o => normalize(o.innerText) === target) ||
+    options.find(o => normalize(o.getAttribute('aria-label')) === target) ||
+    options.find(o => normalize(o.innerText).includes(target)) ||
+    options.find(o => normalize(o.innerText).includes(firstWord)) ||
+    options[0] || null
   );
 }
-
 /*
 |--------------------------------------------------------------------------
 | Workday Combobox
@@ -291,15 +272,15 @@ async function fillCombobox(
     element.tagName === "INPUT" ||
     element.tagName === "TEXTAREA"
   ) {
-    setInputValue(
-      element,
-      value
-    );
+    setInputValue(element, value);
+    await sleep(800);
+    option = findVisibleOption(value);
 
-    await sleep(500);
-
-    option =
-      findVisibleOption(value);
+    if (!option) {
+      setInputValue(element, value.split(' ')[0]);
+      await sleep(500);
+      option = findVisibleOption(value);
+    }
 
     if (option) {
       option.click();
@@ -470,61 +451,82 @@ function getRadioLabel(
   );
 }
 
-function fillRadio(
-  element,
-  value
-) {
-  const target =
-    normalize(value);
+async function fillRadio(element, value) {
+  const target = normalize(value);
 
-  const groupName =
-    element.name;
-
-  let radios = [];
-
-  if (groupName) {
-    radios = [
+  // Strategy 1: native input[type="radio"] by name
+  if (element.name) {
+    const radios = [
       ...document.querySelectorAll(
-        `input[type="radio"][name="${cssEscape(
-          groupName
-        )}"]`
+        `input[type="radio"][name="${cssEscape(element.name)}"]`
       )
     ];
-  } else {
-    radios = [element];
+    const match = radios.find(r => {
+      const label = document.querySelector(`label[for="${cssEscape(r.id)}"]`);
+      const text = normalize(label?.innerText || r.value || "");
+      return text === target || text.includes(target);
+    });
+    if (match) {
+      match.click();
+      await sleep(150);
+      return true;
+    }
   }
 
-  const matchingRadio =
-    radios.find((radio) => {
-      const radioValue =
-        normalize(radio.value);
+  // Strategy 2: Workday role="radiogroup" container
+  const container =
+    element.closest('[role="radiogroup"]') ||
+    element.closest('fieldset') ||
+    element.closest('[data-automation-id^="formField"]');
 
-      const label =
-        normalize(
-          getRadioLabel(radio)
-        );
+  if (container) {
+    const options = [
+      ...container.querySelectorAll('[role="radio"], input[type="radio"]')
+    ].filter(isVisible);
 
-      return (
-        radioValue === target ||
-        label === target
+    const match = options.find(opt => {
+      const text = normalize(
+        opt.innerText ||
+        opt.getAttribute('aria-label') ||
+        opt.value || ""
       );
+      if (target === 'true' || target === 'yes')
+        return text === 'yes' || text.includes('yes');
+      if (target === 'false' || target === 'no')
+        return text === 'no' || text.includes('no');
+      return text === target || text.includes(target);
     });
 
-  if (!matchingRadio) {
-    return false;
+    if (match) {
+      match.click();
+      await sleep(200);
+      return true;
+    }
   }
 
-  if (!matchingRadio.checked) {
-    matchingRadio.click();
+  // Strategy 3: scan all visible role="radio" on page
+  const allRadios = [
+    ...document.querySelectorAll('[role="radio"]')
+  ].filter(isVisible);
+
+  const match = allRadios.find(r => {
+    const text = normalize(
+      r.innerText || r.getAttribute('aria-label') || ""
+    );
+    if (target === 'true' || target === 'yes')
+      return text === 'yes' || text.includes('yes');
+    if (target === 'false' || target === 'no')
+      return text === 'no' || text.includes('no');
+    return text === target || text.includes(target);
+  });
+
+  if (match) {
+    match.click();
+    await sleep(200);
+    return true;
   }
 
-  matchingRadio.dispatchEvent(
-    new Event("change", {
-      bubbles: true
-    })
-  );
-
-  return matchingRadio.checked;
+  return false;
 }
 
 /*
@@ -748,9 +750,9 @@ async function fillMapping(
 
   if (
     mapping.controlType !==
-      "checkbox" &&
+    "checkbox" &&
     mapping.controlType !==
-      "radio" &&
+    "radio" &&
     hasExistingValue(element)
   ) {
     result.status = "skipped";
@@ -819,10 +821,8 @@ async function fillMapping(
      */
 
     if (
-      controlType ===
-      "dropdown" ||
       element.tagName ===
-        "SELECT"
+      "SELECT"
     ) {
       const success =
         fillSelect(
@@ -849,7 +849,9 @@ async function fillMapping(
 
     if (
       controlType ===
-        "combobox" ||
+      "dropdown" ||
+      controlType ===
+      "combobox" ||
       element.getAttribute(
         "role"
       ) === "combobox" ||
@@ -911,7 +913,7 @@ async function fillMapping(
       element.type === "radio"
     ) {
       const success =
-        fillRadio(
+        await fillRadio(
           element,
           mapping.value
         );
@@ -1087,9 +1089,9 @@ function reviewCurrentPage() {
 
         return (
           field.controlType ===
-            "radio" ||
+          "radio" ||
           field.controlType ===
-            "checkbox" ||
+          "checkbox" ||
           label.includes("?")
         );
       }
@@ -1141,11 +1143,11 @@ function getButtonText(
 ) {
   return normalize(
     button.innerText ||
-      button.getAttribute(
-        "aria-label"
-      ) ||
-      button.value ||
-      ""
+    button.getAttribute(
+      "aria-label"
+    ) ||
+    button.value ||
+    ""
   );
 }
 
